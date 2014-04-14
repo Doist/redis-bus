@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
+import pdb
 import json
 import redis
 import uuid
 import pickle
 import fnmatch
+import traceback
 from werkzeug.utils import import_string, validate_arguments, bind_arguments
 
 
@@ -193,7 +195,7 @@ class Bus(object):
             return unset
 
         if self.r.exists(redis_cache_key):
-            return pickle.loads(self.r.get(redis_cache_key))
+            return self._return_or_raise(self.r.get(redis_cache_key))
 
         return unset
 
@@ -217,7 +219,7 @@ class Bus(object):
         data = pickle.dumps([args, kwargs, result_id])
         self.r.lpush(self._k('calls', method_name), data)
 
-    def serve_once(self, pattern=None):
+    def serve_once(self, pattern=None, debug=False):
         """
         Search for all call queues awaited to be executed. Execute everything
         and exit.
@@ -230,9 +232,9 @@ class Bus(object):
                 data = self.r.rpop(self._k('calls', method_name))
                 if data is None:
                     break
-                self._exec_function(method_name, data, method_opts)
+                self._exec_function(method_name, data, method_opts, debug=debug)
 
-    def serve(self, pattern=None):
+    def serve(self, pattern=None, debug=False):
         """
         Execute all enqueued call request in infinite loop
         """
@@ -253,7 +255,7 @@ class Bus(object):
             key, data = self.r.brpop(keys)
             method_name = key.rsplit(':', 1)[-1]
             method_opts = all_method_opts[method_name]
-            self._exec_function(method_name, data, method_opts)
+            self._exec_function(method_name, data, method_opts, debug=debug)
 
     def _get_methods(self, endpoint_name):
         methods = self.r.hgetall(self._k('methods', endpoint_name))
@@ -265,7 +267,7 @@ class Bus(object):
             ret[key] = params
         return ret
 
-    def _exec_function(self, method_name, data, method_opts):
+    def _exec_function(self, method_name, data, method_opts, debug=False):
         """
         Execute a function by method name, pickle-encoded data and method options
 
@@ -282,11 +284,17 @@ class Bus(object):
         if result is unset:
 
             # nothing is found? execute the function
+            # the result is a list [function_result, exception]
             try:
                 e_args, e_kwargs = validate_arguments(func, args[:], kwargs.copy())
-                result = func(*e_args, **e_kwargs)
+                call_result = func(*e_args, **e_kwargs)
+                result = [call_result, None]
             except Exception as e:
-                result = e
+                tb = traceback.format_exc()
+                print(tb)
+                result = [None, e]
+                if debug:
+                    pdb.post_mortem()
 
             # cache the result if it should be cached
             redis_cache_key = self._get_redis_cache_key(method_name, method_opts, args, kwargs)
@@ -310,9 +318,12 @@ class Bus(object):
         key = self._k('results', async_result_id)
         _, raw_result = self.r.blpop(key)
         self.r.rpush(key, raw_result)
-        result = pickle.loads(raw_result)
-        if isinstance(result, Exception):
-            raise result
+        return self._return_or_raise(raw_result)
+
+    def _return_or_raise(self, raw_result):
+        result, exc = pickle.loads(raw_result)
+        if exc is not None:
+            raise exc
         return result
 
     def _k(self, *args):
@@ -393,11 +404,12 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--pattern', default=None, help='filter patterns')
+    parser.add_argument('-d', '--debug', action='store_true', default=False, help='turn on debug (pdb) mode')
     parser.add_argument('bus', help='Bus object to serve')
 
     args = parser.parse_args()
     bus = import_string(args.bus)
-    bus.serve(args.pattern)
+    bus.serve(args.pattern, debug=args.debug)
 
 
 if __name__ == '__main__':

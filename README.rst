@@ -60,7 +60,7 @@ Let's start the service with the following command.
 .. code-block:: console
 
     cd sample
-    python -m redis_bus rng.bus
+    redis-bus rng.bus
 
 
 Here the "rng" is the name of the module where we search for the bus instance,
@@ -123,7 +123,7 @@ Start the worker.
 .. code-block:: console
 
     cd sample
-    python -m redis_bus simple_math.bus
+    redis-bus simple_math.bus
 
 And then switch to the console (note that the bus object "automagically" discovers
 new methods). The bus caches the value for seed equal to 1, and it returns
@@ -149,6 +149,27 @@ You may cleanup the cache manually.
 
     In []: bus.math_now(1)
     Out[]: datetime.datetime(2014, 3, 27, 23, 28, 28, 168701)
+
+
+Debugging facilities
+--------------------
+
+As you start writing your workers, it's often convenient to drop to pdb on
+exception. If you want it, use one of following calls:
+
+.. code-block:: python
+
+    >>> bus.serve(debug=True)
+    >>> bus.serve_once(debug=True)
+
+Or, if you start the bus from the console
+
+.. code-block:: python
+
+    $ redis-bus --debug simple_math.bus
+
+Don't forget to turn this mode off in production. Otherwise your worker stalls
+on the first exception.
 
 
 Cleanup everything

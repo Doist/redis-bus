@@ -9,3 +9,8 @@ def uuid():
 @bus.register()
 def password(length=12):
     return ''.join(random.choice(string.ascii_letters) for _ in range(length))
+
+
+@bus.register()
+def error():
+    raise ValueError('ooops')
